@@ -1,0 +1,53 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.dll
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+env/
+venv/
+*.env
+
+# VSCode settings
+.vscode/
+.code-workspace
+
+# Poetry / Conda environment metadata
+poetry.toml
+
+# Python environment files
+*.egg-info/
+dist/
+build/
+
+# PyTorch Lightning / HF Trainer outputs
+lightning_logs/
+output/
+checkpoints/
+runs/
+wandb/
+
+# Hugging Face caches
+.cache/
+*.h5
+*.ckpt
+
+# Datasets
+data/
+*.zip
+*.tar.gz
+
+# Logs and artifacts
+*.log
+*.tmp
+*.bak
+
+# System files
+.DS_Store
+Thumbs.db
