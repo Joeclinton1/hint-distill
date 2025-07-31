@@ -8,6 +8,7 @@ coding problem using Qwen3‑8B + LoRA (PEFT) with Weights & Biases logging.
 
 import argparse, os, json, random, subprocess, tempfile, textwrap, pathlib, signal, time, sys
 import torch, torch.nn.functional as F
+from torch.utils.data import default_collate
 from datasets import load_dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -15,7 +16,8 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
-from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from transformers import BitsAndBytesConfig
 import wandb
 
 
@@ -44,7 +46,7 @@ def run_python(code_str: str, inp: str, timeout_s: int = 2) -> str:
 
 # ---------- APPS helpers ---------- #
 def load_apps_example(idx: int):
-    ds = load_dataset("codeparrot/apps", split="test[:100]")  # lightweight subset
+    ds = load_dataset("codeparrot/apps", split="test[:100]", trust_remote_code=True)  # lightweight subset
     ex = ds[idx]
     tests = json.loads(ex["input_output"])
     return ex["question"], ex["solutions"][0], tests
@@ -80,21 +82,43 @@ class HintDataset(torch.utils.data.Dataset):
             tgt_src = "\n".join(tgt)
             hint = auto_hint(ctx, tgt)
 
+            # Ensure we have some content
+            if not ctx_src.strip() and not tgt_src.strip():
+                continue
+            
+            # For empty context, add a minimal prompt
+            if not ctx_src.strip():
+                ctx_src = "# Write the following code:\n"
+            
             with_hint = tokenizer(ctx_src + "\n" + hint, return_tensors="pt").input_ids[0]
             no_hint = tokenizer(ctx_src, return_tensors="pt").input_ids[0]
             tgt_ids = tokenizer(tgt_src, return_tensors="pt").input_ids[0]
 
+            # Skip empty samples
+            if len(no_hint) == 0 or len(with_hint) == 0 or len(tgt_ids) == 0:
+                continue
+
             labels_with_hint = torch.full_like(with_hint, -100)
-            labels_with_hint[-len(tgt_ids):] = tgt_ids
+            if len(tgt_ids) <= len(with_hint):
+                labels_with_hint[-len(tgt_ids):] = tgt_ids
+            else:
+                # Truncate tgt_ids if it's longer than the input
+                labels_with_hint[-len(with_hint):] = tgt_ids[-len(with_hint):]
 
             labels_no_hint = torch.full_like(no_hint, -100)
-            labels_no_hint[-len(tgt_ids):] = tgt_ids
+            if len(tgt_ids) <= len(no_hint):
+                labels_no_hint[-len(tgt_ids):] = tgt_ids
+            else:
+                # Truncate tgt_ids if it's longer than the input
+                labels_no_hint[-len(no_hint):] = tgt_ids[-len(no_hint):]
 
             self.samples.append({
-                "input_ids_with_hint": with_hint,
+                "input_ids": no_hint,
+                "labels": labels_no_hint,
                 "input_ids_no_hint": no_hint,
-                "labels_with_hint": labels_with_hint,
+                "input_ids_with_hint": with_hint,
                 "labels_no_hint": labels_no_hint,
+                "labels_with_hint": labels_with_hint,
             })
 
     def __len__(self):
@@ -102,6 +126,20 @@ class HintDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return self.samples[idx]
+
+
+# ---------- Custom collate function ---------- #
+def hint_distill_collate_fn(batch):
+    """Custom collate function that preserves hint distillation keys"""
+    # Standard collation for regular keys
+    standard_batch = default_collate(batch)
+    
+    # Manually add the custom hint distillation keys
+    for key in ["input_ids_no_hint", "input_ids_with_hint", "labels_no_hint", "labels_with_hint"]:
+        if key in batch[0]:
+            standard_batch[key] = torch.stack([item[key] for item in batch])
+    
+    return standard_batch
 
 
 # ---------- Distillation Trainer ---------- #
@@ -112,7 +150,20 @@ class HintDistillTrainer(Trainer):
         self.alpha = alpha
         self.kl = torch.nn.KLDivLoss(reduction="batchmean")
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def get_train_dataloader(self):
+        from torch.utils.data import DataLoader
+        
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.args.train_batch_size,
+            shuffle=True,
+            collate_fn=hint_distill_collate_fn,
+            drop_last=self.args.dataloader_drop_last,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+        )
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         stu_out = model(
             input_ids=inputs["input_ids_no_hint"],
             labels=inputs["labels_no_hint"]
@@ -126,7 +177,17 @@ class HintDistillTrainer(Trainer):
         mask = inputs["labels_no_hint"] != -100
         s_logprobs = F.log_softmax(stu_out.logits / self.T, dim=-1)
         t_probs = F.softmax(tea_out.logits / self.T, dim=-1)
-        distill = self.kl(s_logprobs[mask], t_probs[mask]) * (self.T ** 2)
+        
+        # Flatten tensors and apply mask
+        s_flat = s_logprobs.view(-1, s_logprobs.size(-1))
+        t_flat = t_probs.view(-1, t_probs.size(-1))
+        mask_flat = mask.view(-1)
+        
+        # Apply mask to tokens that we want to keep
+        masked_s_logprobs = s_flat[mask_flat]
+        masked_t_probs = t_flat[mask_flat]
+        
+        distill = self.kl(masked_s_logprobs, masked_t_probs) * (self.T ** 2)
         loss = self.alpha * distill + (1 - self.alpha) * stu_out.loss
         return loss
 
@@ -172,10 +233,11 @@ def main():
         data = json.load(open(args.json_path))
         prompt, gt_code, tests = data["prompt"], data["solution"], data["tests"]
 
-    model_name = "Qwen/Qwen3-8B"
+    model_name = "Qwen/Qwen3-4B"
     tok = AutoTokenizer.from_pretrained(model_name)
+    quantization_config = BitsAndBytesConfig(load_in_8bit=True)
     base_model = AutoModelForCausalLM.from_pretrained(
-        model_name, load_in_8bit=True, device_map="auto"
+        model_name, quantization_config=quantization_config, device_map="auto"
     )
     base_model.eval()
 
@@ -183,7 +245,7 @@ def main():
     wandb.log({"pass@k_base": base_acc})
     print(f"Base model pass@{args.k}: {base_acc}")
 
-    base_model = prepare_model_for_int8_training(base_model)
+    base_model = prepare_model_for_kbit_training(base_model)
     lora_cfg = LoraConfig(
         r=16,
         lora_alpha=32,
