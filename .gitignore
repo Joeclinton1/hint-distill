@@ -51,6 +51,9 @@ generated_codes/
 # Hint logs directory
 hint_logs/
 
+# Hint cache directory
+hint_cache/
+
 # Logs and artifacts
 *.log
 *.tmp

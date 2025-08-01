@@ -29,6 +29,7 @@ from hint_distill import (
     FlexibleHintDataset,
     pass_at_k
 )
+from hint_distill.utils import clear_hint_cache
 
 
 def create_hint_log_file():
@@ -114,13 +115,27 @@ def main():
     parser.add_argument("--hint_method", default="self_reflection", choices=["self_reflection", "dataset_solution"],
                        help="Method for generating hints: self_reflection (model attempts + compares to solution) or dataset_solution (direct from solution)")
     
+    # Hint cache parameters
+    parser.add_argument("--force_regeneration", action="store_true", default=False,
+                       help="Force regeneration of all hints, bypassing cache")
+    parser.add_argument("--clear_cache", action="store_true", default=False,
+                       help="Clear the hint cache before starting")
+    
     args = parser.parse_args()
 
     wandb.init(project=args.project, config=vars(args))
 
+    # Clear cache if requested
+    if args.clear_cache:
+        print("🗑️  Clearing hint cache...")
+        clear_hint_cache()
+
     # Create hint log file for this run
     hint_log_file = create_hint_log_file()
     print(f"Logging hints to: {hint_log_file}")
+    
+    # Print cache status
+    print(f"🎯 Hint caching enabled (force_regeneration={args.force_regeneration})")
 
     # Load dataset
     if args.dataset == "apps":
@@ -183,7 +198,8 @@ def main():
             train_problems, 
             model,  # Pass the model for self-reflection method
             hint_method=args.hint_method,
-            hint_log_file=hint_log_file
+            hint_log_file=hint_log_file,
+            force_regeneration=args.force_regeneration
         )
         
         # Fallback to old dataset if new one fails or for compatibility

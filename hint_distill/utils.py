@@ -8,16 +8,84 @@ import sys
 import tempfile
 import json
 import shutil
+from pathlib import Path
+from typing import Optional, Dict, Any
 from torch.utils.data import default_collate
 import torch
 from hint_distill.prompting import ProgrammingLanguage, LanguageUtils, PromptTemplates
+
+
+# Hint Cache Management
+def get_hint_cache_path() -> str:
+    """Get the path to the hint cache file."""
+    # Create hint_cache directory if it doesn't exist
+    cache_dir = "hint_cache"
+    Path(cache_dir).mkdir(exist_ok=True)
+    return os.path.join(cache_dir, "hint_cache.json")
+
+
+def load_hint_cache() -> dict:
+    """Load the hint cache from disk."""
+    cache_path = get_hint_cache_path()
+    try:
+        if os.path.exists(cache_path):
+            with open(cache_path, 'r') as f:
+                return json.load(f)
+        else:
+            return {}
+    except Exception as e:
+        print(f"Warning: Could not load hint cache: {e}")
+        return {}
+
+
+def save_hint_cache(cache: dict):
+    """Save the hint cache to disk."""
+    cache_path = get_hint_cache_path()
+    try:
+        with open(cache_path, 'w') as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        print(f"Warning: Could not save hint cache: {e}")
+
+
+def get_hint_cache_key(problem_metadata: dict, hint_method: str, language: ProgrammingLanguage) -> str:
+    """Generate a unique cache key for a problem based on its metadata and hint method."""
+    problem_id = problem_metadata.get("problem_id", "unknown")
+    source = problem_metadata.get("source", "unknown")
+    return f"{source}_{problem_id}_{hint_method}_{language.value}"
+
+
+def get_cached_hint(problem_metadata: dict, hint_method: str, language: ProgrammingLanguage) -> str:
+    """Get a cached hint for a problem if it exists."""
+    cache_key = get_hint_cache_key(problem_metadata, hint_method, language)
+    cache = load_hint_cache()
+    return cache.get(cache_key) or ""
+
+
+def cache_hint(problem_metadata: dict, hint_method: str, language: ProgrammingLanguage, hint: str):
+    """Cache a hint for a problem."""
+    cache_key = get_hint_cache_key(problem_metadata, hint_method, language)
+    cache = load_hint_cache()
+    cache[cache_key] = hint
+    save_hint_cache(cache)
+
+
+def clear_hint_cache():
+    """Clear the hint cache."""
+    cache_path = get_hint_cache_path()
+    if os.path.exists(cache_path):
+        try:
+            os.remove(cache_path)
+            print("Hint cache cleared")
+        except Exception as e:
+            print(f"Warning: Could not clear hint cache: {e}")
 
 
 def generate_llm_hint(model, tokenizer, hint_prompt: str) -> str:
     """Generate hint using the LLM model itself."""
     try:
         # Tokenize the hint prompt
-        inputs = tokenizer(hint_prompt, return_tensors="pt", truncation=True, max_length=512)
+        inputs = tokenizer(hint_prompt, return_tensors="pt", truncation=False)
         
         # Move to the same device as the model
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
@@ -26,7 +94,9 @@ def generate_llm_hint(model, tokenizer, hint_prompt: str) -> str:
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=25,  # Keep hints extremely short (15-20 words max)
+                max_new_tokens=100,  # Keep hints extremely short (30-50 words max)
+                num_beams=1,  # No beam search for subtlety
+                temperature=0.5,  # Slightly higher temperature for more creative hints
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id
@@ -36,35 +106,8 @@ def generate_llm_hint(model, tokenizer, hint_prompt: str) -> str:
         generated_tokens = outputs[0][inputs['input_ids'].shape[1]:]
         generated_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
         
-        # Clean up the generated text
-        hint_part = generated_text.strip()
-        
-        # Extract the actual hint if it contains the marker
-        if "# Hint: " in hint_part:
-            hint_start = hint_part.find("# Hint: ")
-            actual_hint = hint_part[hint_start:]
-        elif hint_part.startswith("# Hint: "):
-            actual_hint = hint_part
-        elif hint_part:
-            actual_hint = "# Hint: " + hint_part
-        else:
-            actual_hint = "# Hint: Consider the constraints carefully"
-        
-        # Validate that the hint is sufficiently subtle and short
-        hint_text = actual_hint.replace("# Hint: ", "").strip()
-        
-        # Always provide a random subtle hint to ensure variety and safety
-        import random
-        subtle_hints = [
-            "# Hint: Reconsider your approach",
-            "# Hint: Think differently about this", 
-            "# Hint: Look at it from another angle",
-            "# Hint: Consider the constraints",
-            "# Hint: Start with the basics"
-        ]
-        actual_hint = random.choice(subtle_hints)
-        
-        return actual_hint
+        # Always use the LLM's generated hint, even if formatted imperfectly
+        return generated_text.strip()
             
     except Exception as e:
         print(f"Error generating LLM hint: {e}")
@@ -205,17 +248,36 @@ def run_code_multi_lang(code_str: str, inp: str, timeout_s: int = 2, language: P
     return out
 
 
-def generate_hint(problem: str, solution_plan: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, method: str = "self_reflection", model_solution_code: str = None, model=None, tokenizer=None):
+def generate_hint(problem: str, solution_plan: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, method: str = "self_reflection", model_solution_code: Optional[str] = None, model=None, tokenizer=None, problem_metadata: Optional[Dict[str, Any]] = None, force_regeneration: bool = False):
     """Generate hint using specified method."""
+    if problem_metadata is None:
+        problem_metadata = {"problem_id": "unknown", "source": "unknown"}
+    
+    # Check cache first if not forcing regeneration
+    if not force_regeneration:
+        cached_hint = get_cached_hint(problem_metadata, method, language)
+        if cached_hint:
+            print(f"🎯 Using cached hint for problem {problem_metadata.get('problem_id', 'unknown')}")
+            return cached_hint
+    
+    # Generate new hint
     if method == "self_reflection":
-        return generate_self_reflection_hint(problem, solution_plan, solution_code, language, model_solution_code, model, tokenizer)
+        hint = generate_self_reflection_hint(problem, solution_plan, solution_code, language, model_solution_code, model, tokenizer, problem_metadata, force_regeneration)
     elif method == "dataset_solution":
-        return generate_dataset_solution_hint(problem, solution_code, language, model, tokenizer)
+        hint = generate_dataset_solution_hint(problem, solution_code, language, model, tokenizer, problem_metadata, force_regeneration)
     else:
         raise ValueError(f"Unknown hint generation method: {method}")
+    
+    # Cache the generated hint
+    cache_hint(problem_metadata, method, language, hint)
+    return hint
 
-def generate_self_reflection_hint(problem: str, model_solution_plan: str, model_solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, correct_solution: str = None, model=None, tokenizer=None):
+def generate_self_reflection_hint(problem: str, model_solution_plan: str, model_solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, correct_solution: Optional[str] = None, model=None, tokenizer=None, problem_metadata: Optional[Dict[str, Any]] = None, force_regeneration: bool = False):
     """Generate intelligent hint based on self-reflection comparing model solution to correct solution."""
+    if problem_metadata is None:
+        problem_metadata = {"problem_id": "unknown", "source": "unknown"}
+    
+    # Note: Cache check is done in the main generate_hint function, so we don't need to check again here
     try:
         if correct_solution is None:
             # If no correct solution provided, analyze the model's own solution
@@ -236,8 +298,12 @@ def generate_self_reflection_hint(problem: str, model_solution_plan: str, model_
         # Fallback to analyzing the model's solution
         return _analyze_solution_complexity(model_solution_code, language)
 
-def generate_dataset_solution_hint(problem: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, model=None, tokenizer=None):
+def generate_dataset_solution_hint(problem: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, model=None, tokenizer=None, problem_metadata: Optional[Dict[str, Any]] = None, force_regeneration: bool = False):
     """Generate intelligent hint based directly on dataset solution."""
+    if problem_metadata is None:
+        problem_metadata = {"problem_id": "unknown", "source": "unknown"}
+    
+    # Note: Cache check is done in the main generate_hint function, so we don't need to check again here
     try:
         if model is not None and tokenizer is not None:
             hint_prompt = PromptTemplates.get_dataset_solution_hint_prompt(problem, solution_code, language)

@@ -495,32 +495,24 @@ class PromptTemplates:
             ProgrammingLanguage.JAVASCRIPT: "JavaScript"
         }[language]
         
-        return f"""Analyze this programming problem and its correct {language_name} solution to generate a subtle hint. The hint should provide ONLY the first step or smallest possible pointer toward the key insight, without EVER revealing the solution approach or giving away the answer.
+        return f"""Analyze this programming problem and its correct {language_name} solution to generate a concise and subtle hint.
 
 Problem:
-{problem}
+```{problem}```
 
 Correct Solution:
 ```{language_name.lower()}
 {solution_code}
 ```
+Example of good subtle hint (do not copy this!):
+Hint: If two adjacent values are equal, what impact does that have?
 
-Generate a hint that:
-1. Gives ONLY the first tiny step toward the insight (like a breadcrumb, not the whole path)
-2. NEVER directly states the algorithm, approach, or solution method
-3. Might ask a simple question or point out what to look at (without saying why)
-4. Should be less than 15 words when possible
-
-Examples of good subtle hints:
-- "# Hint: What patterns emerge when you look at small cases?"
-- "# Hint: Consider the constraints carefully"
-- "# Hint: Start by examining the simple cases first"
-
-Provide only the hint text starting with "# Hint: " and nothing else."""
+your hint must be very concise under 50 words and give the first step to the answer but do not give the answer. just subtle nudge in the right direction. Give only the hint text starting with "# Hint: " and nothing else."""
     
     @staticmethod
     def get_self_reflection_hint_prompt(problem: str, model_solution_plan: str, model_solution_code: str, correct_solution: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON) -> str:
-        """Generate prompt for self-reflection hint by comparing model solution to correct solution."""
+        """Generate prompt for a subtle hint based on comparing model and correct solutions, in the same style as other minimal hints."""
+
         language_name = {
             ProgrammingLanguage.PYTHON: "Python",
             ProgrammingLanguage.CPP: "C++",
@@ -528,33 +520,36 @@ Provide only the hint text starting with "# Hint: " and nothing else."""
             ProgrammingLanguage.JAVASCRIPT: "JavaScript"
         }[language]
         
-        return f"""Compare the model's attempted solution with the correct solution to generate a subtle hint. The hint should ONLY provide the smallest possible hint to point the model in the right direction, WITHOUT EVER revealing what it missed or giving away the correct approach.
+        return f"""Compare the model's attempted solution with the correct solution to generate a subtle, minimal hint. Do NOT reference what the model did wrong or reflect on the model's thinking. The hint should be phrased in exactly the same style as other subtle hints — like a breadcrumb that nudges the solver toward the right path.
 
-Problem:
-{problem}
+    Problem:
+    {problem}
 
-Model's Solution Plan:
-{model_solution_plan}
+    Model's Solution Plan:
+    {model_solution_plan}
 
-Model's Solution Code:
-```{language_name.lower()}
-{model_solution_code}
-```
+    Model's Solution Code:
+    ```{language_name.lower()}
+    {model_solution_code}
+    ````
 
-Correct Solution:
-```{language_name.lower()}
-{correct_solution}
-```
+    Correct Solution:
 
-Based on the differences, generate a hint that:
-1. Gives ONLY the tiniest hint about what to reconsider (never state what they missed directly)
-2. NEVER mentions the correct approach, algorithm, or solution method
-3. Might suggest looking at something small or asking a minor question
-4. Should be extremely subtle, like a whisper of guidance
+    ```{language_name.lower()}
+    {correct_solution}
+    ```
 
-Examples of good subtle reflection hints:
-- "# Hint: Reconsider your initial assumptions"
-- "# Hint: Maybe look at this from a different angle"
-- "# Hint: What if you approached it more simply?"
+    Your task is to analyze the difference and produce a **single minimal hint** that:
 
-Provide only the hint text starting with "# Hint: " and nothing else."""
+    1. Gives ONLY the first tiny step toward the insight (like a breadcrumb)
+    2. NEVER states the algorithm, approach, or what’s missing
+    3. May point out something to look at or ask a basic question
+    4. Should be less than 50 words when possible
+
+    Examples of good subtle hints:
+
+    * "# Hint: What happens if you fix one side and vary the other?"
+    * "# Hint: Try building a few small examples by hand"
+    * "# Hint: What must be true about every valid output?"
+
+    Return only the hint text starting with "# Hint: " and nothing else."""

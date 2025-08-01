@@ -256,10 +256,11 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
     """Dataset for hint distillation supporting both self-reflection and dataset solution methods."""
     
     def __init__(self, tokenizer, problems_data: List[Dict[str, Any]], model, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, 
-                 hint_method: str = "self_reflection", max_problems: int = None, hint_log_file: str = None):
+                 hint_method: str = "self_reflection", max_problems: int = None, hint_log_file: str = None, force_regeneration: bool = False):
         self.samples = []
         self.hint_method = hint_method
         self.hint_log_file = hint_log_file
+        self.force_regeneration = force_regeneration
         
         problems_processed = 0
         print(f"DEBUG: FlexibleHintDataset initializing with {len(problems_data)} problems, hint_method={hint_method}")
@@ -299,6 +300,7 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                         model_solution_code = generation_result["code"]
                 
                 # Generate hint using the specified method
+                problem_metadata = problem_data.get("metadata", {})
                 if hint_method == "self_reflection":
                     hint = generate_hint(
                         problem, 
@@ -308,7 +310,9 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                         method="self_reflection",
                         model_solution_code=correct_solution if correct_solution else None,
                         model=model,
-                        tokenizer=tokenizer
+                        tokenizer=tokenizer,
+                        problem_metadata=problem_metadata,
+                        force_regeneration=self.force_regeneration
                     )
                 elif hint_method == "dataset_solution":
                     solution_for_hint = correct_solution if correct_solution else model_solution_code
@@ -319,7 +323,9 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                         language=language,
                         method="dataset_solution",
                         model=model,
-                        tokenizer=tokenizer
+                        tokenizer=tokenizer,
+                        problem_metadata=problem_metadata,
+                        force_regeneration=self.force_regeneration
                     )
                 else:
                     raise ValueError(f"Unknown hint method: {hint_method}")
