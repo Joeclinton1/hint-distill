@@ -1,0 +1,25 @@
+def solve(input_data):
+    # Parse the input string
+    s = input_data.strip()
+    
+    # Initialize variables to track the maximum length of the accordion
+    max_length = -1
+    
+    # Iterate through all possible substrings of s
+    for i in range(len(s)):
+        for j in range(i + 1, len(s) + 1):
+            # Extract the substring
+            substring = s[i:j]
+            
+            # Check if the substring is an accordion
+            if substring[0] == '[' and substring[-1] == ']' and \
+               substring.count(':') == 2 and substring.count('|') >= 0:
+                # Calculate the length of the accordion
+                length = j - i
+                
+                # Update the maximum length if the current one is greater
+                if length > max_length:
+                    max_length = length
+    
+    # Return the maximum length of the accordion
+    return max_length

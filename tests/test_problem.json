@@ -1,8 +1,8 @@
 {
-  "prompt": "Write a Python function that adds two numbers and returns the result.",
-  "solution": "def add_numbers(a, b):\n    return a + b\n",
-  "tests": [
-    {"input": "2\n3\n", "output": "5"},
-    {"input": "10\n20\n", "output": "30"}
-  ]
+  "prompt": "Write a function that returns the sum of two numbers.",
+  "solution": "def add(a, b):\n    return a + b",
+  "tests": {
+    "inputs": [[1, 2], [3, 4]],
+    "outputs": [3, 7]
+  }
 }
