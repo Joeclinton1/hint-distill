@@ -3,7 +3,7 @@ Hint Distill - A self-supervised hint distillation system for competitive progra
 """
 
 from .data import HintDataset, MultiLanguageHintDataset, ProblemLoader, SelfReflectionHintDataset, FlexibleHintDataset
-from .trainer import HintDistillTrainer
+from .trainer import HintDistillTrainer, IntervalValidationTrainer
 from .models import ModelLoader
 from .evaluation import (
     pass_at_k, tests_pass, generate_code, evaluate_code_detailed, test_model_single
@@ -21,6 +21,7 @@ __all__ = [
     "SelfReflectionHintDataset",
     "FlexibleHintDataset",
     "HintDistillTrainer",
+    "IntervalValidationTrainer",
     "ModelLoader",
     "pass_at_k",
     "tests_pass",

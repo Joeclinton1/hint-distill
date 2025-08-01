@@ -9,7 +9,9 @@ coding problem using Qwen3‑8B + LoRA (PEFT) with Weights & Biases logging.
 import argparse, json
 import os
 import wandb
+from datetime import datetime
 from datasets import load_dataset
+from sklearn.model_selection import train_test_split
 
 # Disable AWQ loading that causes import errors
 os.environ["PEFT_DISABLE_AWQ"] = "1"
@@ -23,10 +25,31 @@ from peft import LoraConfig, get_peft_model
 from hint_distill import (
     HintDataset,
     HintDistillTrainer,
+    IntervalValidationTrainer,
     FlexibleHintDataset,
     pass_at_k
 )
 
+
+def create_hint_log_file():
+    """Create a unique hint log file for this run."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    hint_log_file = f"hint_log_{timestamp}.jsonl"
+    return hint_log_file
+
+def log_hint_to_file(hint_log_file, problem_metadata, hint, context, target, hint_method):
+    """Log hint information to file."""
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "problem_metadata": problem_metadata,
+        "hint": hint,
+        "context": context,
+        "target": target,
+        "hint_method": hint_method
+    }
+    
+    with open(hint_log_file, "a") as f:
+        f.write(json.dumps(log_entry) + "\n")
 
 def load_apps_examples(start_idx: int, subset_size: int = None):
     """Load multiple examples from APPS dataset."""
@@ -78,6 +101,10 @@ def main():
                        help="Number of training examples to use (None = full dataset, 1 = old behavior)")
     parser.add_argument("--disable_evals", action="store_true", default=True,
                        help="Disable evaluations to focus on training loss monitoring")
+    parser.add_argument("--validation_intervals", type=int, default=5,
+                       help="Number of validation intervals per epoch")
+    parser.add_argument("--validation_sample_ratio", type=float, default=0.1,
+                       help="Fraction of validation set to sample at each interval")
     
     # New hint method parameters
     parser.add_argument("--hint_method", default="self_reflection", choices=["self_reflection", "dataset_solution"],
@@ -86,6 +113,10 @@ def main():
     args = parser.parse_args()
 
     wandb.init(project=args.project, config=vars(args))
+
+    # Create hint log file for this run
+    hint_log_file = create_hint_log_file()
+    print(f"Logging hints to: {hint_log_file}")
 
     # Load dataset
     if args.dataset == "apps":
@@ -103,6 +134,21 @@ def main():
         }]
         prompt = data["prompt"]
         tests = data["tests"]
+
+    # Create train/validation split if we have enough data
+    train_problems = problems_data
+    val_problems = []
+    
+    if len(problems_data) > 10:
+        print(f"Creating train/validation split from {len(problems_data)} problems")
+        train_problems, val_problems = train_test_split(
+            problems_data, 
+            test_size=0.2,  # 20% validation split
+            random_state=42
+        )
+        print(f"Train set: {len(train_problems)} problems, Validation set: {len(val_problems)} problems")
+    else:
+        print(f"Using all {len(problems_data)} problems for training (validation disabled)")
 
     model_name = "Qwen/Qwen2.5-Coder-3B-Instruct"
     tok = AutoTokenizer.from_pretrained(model_name)
@@ -127,12 +173,13 @@ def main():
 
     # Create dataset with selected hint method
     if args.hint_method in ["self_reflection", "dataset_solution"]:
-        print(f"Creating FlexibleHintDataset with {len(problems_data)} problems using {args.hint_method} method")
+        print(f"Creating FlexibleHintDataset with {len(train_problems)} problems using {args.hint_method} method")
         train_ds = FlexibleHintDataset(
             tok, 
-            problems_data, 
+            train_problems, 
             model,  # Pass the model for self-reflection method
-            hint_method=args.hint_method
+            hint_method=args.hint_method,
+            hint_log_file=hint_log_file
         )
         
         # Fallback to old dataset if new one fails or for compatibility
@@ -140,13 +187,13 @@ def main():
             print("⚠️  FlexibleHintDataset failed, falling back to HintDataset")
             from hint_distill import ProgrammingLanguage
             # Use first problem for fallback
-            fallback_code = problems_data[0]["solution"]
+            fallback_code = train_problems[0]["solution"]
             train_ds = HintDataset(tok, fallback_code, n_lines=3, language=ProgrammingLanguage.PYTHON)
             print(f"DEBUG: Fallback HintDataset created with {len(train_ds)} samples")
     else:
         # For backward compatibility, use original HintDataset
         from hint_distill import ProgrammingLanguage
-        fallback_code = problems_data[0]["solution"]
+        fallback_code = train_problems[0]["solution"]
         train_ds = HintDataset(tok, fallback_code, n_lines=3, language=ProgrammingLanguage.PYTHON)
         print(f"Using legacy HintDataset with {len(train_ds)} samples")
 
@@ -171,13 +218,28 @@ def main():
     print(f"Using dataset with {len(train_ds)} samples")
     
     # Create the trainer
-    trainer = HintDistillTrainer(
-        model=model,
-        args=train_args,
-        train_dataset=train_ds,
-        temperature=2.0,
-        alpha=0.5,
-    )
+    if len(val_problems) > 0:
+        print(f"Using IntervalValidationTrainer with {len(val_problems)} validation problems")
+        trainer = IntervalValidationTrainer(
+            model=model,
+            args=train_args,
+            train_dataset=train_ds,
+            validation_problems=val_problems,
+            validation_intervals=args.validation_intervals,
+            validation_sample_ratio=args.validation_sample_ratio,
+            tokenizer=tok,
+            temperature=2.0,
+            alpha=0.5,
+        )
+    else:
+        print("Using standard HintDistillTrainer (no validation data)")
+        trainer = HintDistillTrainer(
+            model=model,
+            args=train_args,
+            train_dataset=train_ds,
+            temperature=2.0,
+            alpha=0.5,
+        )
     
     # Run training
     print("Starting training...")

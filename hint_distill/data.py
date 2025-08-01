@@ -256,9 +256,10 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
     """Dataset for hint distillation supporting both self-reflection and dataset solution methods."""
     
     def __init__(self, tokenizer, problems_data: List[Dict[str, Any]], model, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, 
-                 hint_method: str = "self_reflection", max_problems: int = None):
+                 hint_method: str = "self_reflection", max_problems: int = None, hint_log_file: str = None):
         self.samples = []
         self.hint_method = hint_method
+        self.hint_log_file = hint_log_file
         
         problems_processed = 0
         print(f"DEBUG: FlexibleHintDataset initializing with {len(problems_data)} problems, hint_method={hint_method}")
@@ -362,6 +363,23 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                     "hint": hint,
                     "metadata": problem_data.get("metadata", {})
                 })
+                
+                # Log hint to file if hint_log_file is provided
+                if self.hint_log_file:
+                    # Import here to avoid circular dependency
+                    import sys
+                    import os
+                    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    from hint_distill_demo import log_hint_to_file
+                    log_hint_to_file(
+                        self.hint_log_file,
+                        problem_data.get("metadata", {}),
+                        hint,
+                        model_solution_plan[:200] + "..." if len(model_solution_plan) > 200 else model_solution_plan,
+                        target_solution[:200] + "..." if len(target_solution) > 200 else target_solution,
+                        hint_method
+                    )
+                
                 problems_processed += 1
                 
             except Exception as e:
