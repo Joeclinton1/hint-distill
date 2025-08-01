@@ -27,7 +27,6 @@ def generate_llm_hint(model, tokenizer, hint_prompt: str) -> str:
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=25,  # Keep hints extremely short (15-20 words max)
-                temperature=0.3,    # Much lower temperature for more focused, controlled output
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id

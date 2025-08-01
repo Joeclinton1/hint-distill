@@ -219,7 +219,6 @@ def main():
     
     # Generation options
     parser.add_argument("--max_tokens", type=int, default=2048, help="Max tokens to generate")
-    parser.add_argument("--temperature", type=float, default=0.7, help="Generation temperature")
     parser.add_argument("--num_beams", type=int, default=1, help="Number of beams")
     parser.add_argument("--do_sample", action="store_true", default=True, help="Enable sampling")
     parser.add_argument("--no_stream", action="store_false", dest="stream", default=True, help="Disable streaming generation")
@@ -258,7 +257,6 @@ def main():
     # Generation parameters
     generation_params = {
         "max_new_tokens": args.max_tokens,
-        "temperature": args.temperature,
         "num_beams": args.num_beams,
         "do_sample": args.do_sample,
         "stream": args.stream

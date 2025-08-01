@@ -70,7 +70,7 @@ def tests_pass(code_str: str, tests, timeout=2, language: ProgrammingLanguage = 
         return True
 
 
-def pass_at_k(model, tokenizer, problem, language=ProgrammingLanguage.PYTHON, k=5, temp=0.2, max_new=256):
+def pass_at_k(model, tokenizer, problem, language=ProgrammingLanguage.PYTHON, k=5, max_new=256):
     """Calculate pass@k metric by generating k solutions and testing them."""
     ok = False
     
@@ -81,7 +81,6 @@ def pass_at_k(model, tokenizer, problem, language=ProgrammingLanguage.PYTHON, k=
         gen = model.generate(
             **inputs,
             do_sample=True,
-            temperature=temp,
             max_new_tokens=max_new,
             pad_token_id=tokenizer.eos_token_id,
         )
@@ -105,7 +104,6 @@ def generate_code(
     problem: Dict[str, Any],
     language: ProgrammingLanguage = ProgrammingLanguage.PYTHON,
     max_new_tokens: int = 512,
-    temperature: float = 0.2, 
     num_beams: int = 1, 
     do_sample: bool = True,
     extract_plan: bool = True,
@@ -124,14 +122,14 @@ def generate_code(
         if stream and num_beams == 1 and do_sample:
             # Use streaming generation
             raw_output, full_output, extraction_time = _generate_code_streaming(
-                model, tokenizer, structured_prompt, max_new_tokens, temperature, extract_plan
+                model, tokenizer, structured_prompt, max_new_tokens, extract_plan
             )
             generation_time = time.time() - start_time - extraction_time
             generation_time += extraction_time  # Add extraction time back
         else:
             # Use non-streaming generation
             raw_output, full_output = _generate_code_non_streaming(
-                model, tokenizer, structured_prompt, max_new_tokens, temperature, num_beams, do_sample
+                model, tokenizer, structured_prompt, max_new_tokens, num_beams, do_sample
             )
             generation_time = time.time() - start_time
         
@@ -149,8 +147,7 @@ def generate_code(
             "tokens": len(full_output.split()),
             "lines": len(extracted_code.split('\n')) if extracted_code else 0,
             "language": language.value,
-            "temperature": temperature,
-            "do_sample": do_sample,
+                        "do_sample": do_sample,
             "num_beams": num_beams
         }
         
@@ -163,7 +160,7 @@ def generate_code(
         }
 
 
-def _generate_code_streaming(model, tokenizer, prompt: str, max_new_tokens: int, temperature: float, extract_plan: bool):
+def _generate_code_streaming(model, tokenizer, prompt: str, max_new_tokens: int, extract_plan: bool):
     """Generate code with streaming output using TextIteratorStreamer."""
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     
@@ -184,8 +181,7 @@ def _generate_code_streaming(model, tokenizer, prompt: str, max_new_tokens: int,
         "max_new_tokens": max_new_tokens,
         "streamer": streamer,
         "do_sample": True,
-        "temperature": temperature,
-        "pad_token_id": tokenizer.eos_token_id,
+                "pad_token_id": tokenizer.eos_token_id,
         "eos_token_id": tokenizer.eos_token_id,
     }
     
@@ -231,7 +227,7 @@ def _generate_code_streaming(model, tokenizer, prompt: str, max_new_tokens: int,
     return raw_output, full_output, extraction_time
 
 
-def _generate_code_non_streaming(model, tokenizer, prompt: str, max_new_tokens: int, temperature: float, num_beams: int, do_sample: bool):
+def _generate_code_non_streaming(model, tokenizer, prompt: str, max_new_tokens: int, num_beams: int, do_sample: bool):
     """Generate code without streaming (for beam search or non-sampling)."""
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_length = inputs.input_ids.shape[1]
@@ -240,8 +236,7 @@ def _generate_code_non_streaming(model, tokenizer, prompt: str, max_new_tokens: 
         **inputs,
         "max_new_tokens": max_new_tokens,
         "do_sample": do_sample,
-        "temperature": temperature,
-        "num_beams": num_beams,
+                "num_beams": num_beams,
         "pad_token_id": tokenizer.eos_token_id,
     }
     
