@@ -33,8 +33,12 @@ from hint_distill import (
 
 def create_hint_log_file():
     """Create a unique hint log file for this run."""
+    # Ensure hint_logs directory exists
+    hint_logs_dir = "hint_logs"
+    os.makedirs(hint_logs_dir, exist_ok=True)
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    hint_log_file = f"hint_log_{timestamp}.jsonl"
+    hint_log_file = os.path.join(hint_logs_dir, f"hint_log_{timestamp}.jsonl")
     return hint_log_file
 
 def log_hint_to_file(hint_log_file, problem_metadata, hint, context, target, hint_method):

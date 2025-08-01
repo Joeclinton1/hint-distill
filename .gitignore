@@ -48,6 +48,9 @@ data/
 generated_codes/
 *.python
 
+# Hint logs directory
+hint_logs/
+
 # Logs and artifacts
 *.log
 *.tmp
