@@ -30,7 +30,7 @@ from hint_distill import (
 
 def load_apps_example(idx: int):
     """Load a single example from APPS dataset."""
-    ds = load_dataset("codeparrot/apps", split="test[:100]", difficulties=["competition"], trust_remote_code=True)
+    ds = load_dataset("codeparrot/apps", split="test[:100]", difficulties=["interview"], trust_remote_code=True)
     ex = ds[idx]
     tests = json.loads(ex["input_output"])
     solutions = json.loads(ex["solutions"])
@@ -54,9 +54,7 @@ def main():
     
     args = parser.parse_args()
 
-    print("DEBUG: Initializing wandb...")
     wandb.init(project=args.project, config=vars(args))
-    print("DEBUG: wandb initialized")
 
     if args.dataset == "apps":
         prompt, gt_code, tests = load_apps_example(args.index)
@@ -72,12 +70,9 @@ def main():
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name, device_map="auto", torch_dtype="auto"
     )
-    print("DEBUG: Model loaded, calling eval()...")
     base_model.eval()
 
-    print("DEBUG: Model eval completed, preparing for training...")
     # base_model = prepare_model_for_kbit_training(base_model)  # Skip since no quantization
-    print("DEBUG: Model ready for training")
     lora_cfg = LoraConfig(
         r=16,
         lora_alpha=32,
@@ -105,14 +100,13 @@ def main():
         }
     
     # Create dataset with selected hint method
-    print("DEBUG: Creating FlexibleHintDataset...")
+
     train_ds = FlexibleHintDataset(
         tok, 
         [problem_data], 
         model,  # Pass the model for self-reflection method
         hint_method=args.hint_method
     )
-    print(f"DEBUG: FlexibleHintDataset created with {len(train_ds)} samples")
     
     # Fallback to old dataset if new one fails or for compatibility
     if len(train_ds) == 0:
@@ -132,12 +126,9 @@ def main():
         report_to=["wandb"],
     )
 
-    print("DEBUG: Creating PEFT model...")
     # Try with low_cpu_mem_usage=False to avoid AWQ issues
     model = get_peft_model(base_model, lora_cfg)
-    print("DEBUG: PEFT model created")
 
-    print("DEBUG: Creating HintDistillTrainer...")
     trainer = HintDistillTrainer(
         model=model,
         args=train_args,
@@ -145,7 +136,6 @@ def main():
         temperature=2.0,
         alpha=0.5,
     )
-    print("DEBUG: Trainer created, starting training...")
     trainer.train()
     print("DEBUG: Training completed")
 
