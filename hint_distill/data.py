@@ -6,8 +6,9 @@ import json
 from typing import Dict, Any, Optional, List
 import torch
 from datasets import load_dataset
-from hint_distill.utils import generate_self_reflection_hint, make_chunks
+from hint_distill.utils import generate_self_reflection_hint, make_chunks, auto_hint, generate_hint
 from hint_distill.prompting import ProgrammingLanguage, PromptTemplates
+from hint_distill.evaluation import generate_code
 
 
 class HintDataset(torch.utils.data.Dataset):
@@ -260,8 +261,10 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
         self.hint_method = hint_method
         
         problems_processed = 0
+        print(f"DEBUG: FlexibleHintDataset initializing with {len(problems_data)} problems, hint_method={hint_method}")
         
-        for problem_data in problems_data:
+        for i, problem_data in enumerate(problems_data):
+            print(f"DEBUG: Processing problem {i}")
             if max_problems and problems_processed >= max_problems:
                 break
             
@@ -279,6 +282,7 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                 
                 if hint_method == "self_reflection":
                     # Generate model's attempt
+                    print(f"DEBUG: Calling generate_code for problem {i}...")
                     generation_result = generate_code(
                         model, 
                         tokenizer, 
@@ -287,6 +291,7 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                         max_new_tokens=2048,
                         stream=False
                     )
+                    print(f"DEBUG: generate_code completed for problem {i}")
                     
                     if "error" not in generation_result:
                         model_solution_plan = generation_result.get("plan", "")

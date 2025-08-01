@@ -66,6 +66,12 @@ class HintDistillTrainer(Trainer):
         # Gather predictions for the actual labels
         batch_size, seq_len, vocab_size = s_logprobs.shape
         
+        # Ensure shapes match by using the minimum sequence length
+        min_seq_len = min(s_logprobs.shape[1], t_probs.shape[1])
+        s_logprobs = s_logprobs[:, :min_seq_len]
+        t_probs = t_probs[:, :min_seq_len]
+        shift_mask = shift_mask[:, :min_seq_len]
+        
         # Reshape for masking
         s_logprobs_reshaped = s_logprobs.reshape(-1, vocab_size)
         t_probs_reshaped = t_probs.reshape(-1, vocab_size)

@@ -2,7 +2,7 @@
 Unified prompting utilities for hint distillation with structured output.
 """
 
-from typing import List
+from typing import List, Dict
 from enum import Enum
 
 

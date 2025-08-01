@@ -7,15 +7,18 @@ coding problem using Qwen3‑8B + LoRA (PEFT) with Weights & Biases logging.
 """
 
 import argparse, json
+import os
 import wandb
 from datasets import load_dataset
+
+# Disable AWQ loading that causes import errors
+os.environ["PEFT_DISABLE_AWQ"] = "1"
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     TrainingArguments,
 )
-from transformers.utils.quantization_config import BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, get_peft_model
 
 from hint_distill import (
     HintDataset,
@@ -51,7 +54,9 @@ def main():
     
     args = parser.parse_args()
 
+    print("DEBUG: Initializing wandb...")
     wandb.init(project=args.project, config=vars(args))
+    print("DEBUG: wandb initialized")
 
     if args.dataset == "apps":
         prompt, gt_code, tests = load_apps_example(args.index)
@@ -59,19 +64,20 @@ def main():
         data = json.load(open(args.json_path))
         prompt, gt_code, tests = data["prompt"], data["solution"], data["tests"]
 
-    model_name = "Qwen/Qwen3-4B"
+    model_name = "Qwen/Qwen2.5-Coder-3B-Instruct"
     tok = AutoTokenizer.from_pretrained(model_name)
-    quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+    # Try without quantization first to see if that's the issue
+    # quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+    print("DEBUG: Loading model...")
     base_model = AutoModelForCausalLM.from_pretrained(
-        model_name, quantization_config=quantization_config, device_map="auto"
+        model_name, device_map="auto", torch_dtype="auto"
     )
+    print("DEBUG: Model loaded, calling eval()...")
     base_model.eval()
 
-    base_acc = pass_at_k(base_model, tok, prompt, tests, k=args.k)
-    wandb.log({"pass@k_base": base_acc})
-    print(f"Base model pass@{args.k}: {base_acc}")
-
-    base_model = prepare_model_for_kbit_training(base_model)
+    print("DEBUG: Model eval completed, preparing for training...")
+    # base_model = prepare_model_for_kbit_training(base_model)  # Skip since no quantization
+    print("DEBUG: Model ready for training")
     lora_cfg = LoraConfig(
         r=16,
         lora_alpha=32,
@@ -99,18 +105,21 @@ def main():
         }
     
     # Create dataset with selected hint method
+    print("DEBUG: Creating FlexibleHintDataset...")
     train_ds = FlexibleHintDataset(
         tok, 
         [problem_data], 
         model,  # Pass the model for self-reflection method
         hint_method=args.hint_method
     )
+    print(f"DEBUG: FlexibleHintDataset created with {len(train_ds)} samples")
     
     # Fallback to old dataset if new one fails or for compatibility
     if len(train_ds) == 0:
         print("⚠️  FlexibleHintDataset failed, falling back to HintDataset")
         from hint_distill import ProgrammingLanguage
         train_ds = HintDataset(tok, gt_code, n_lines=3, language=ProgrammingLanguage.PYTHON)
+        print(f"DEBUG: Fallback HintDataset created with {len(train_ds)} samples")
 
     train_args = TrainingArguments(
         output_dir="./hint_ckpt",
@@ -118,11 +127,17 @@ def main():
         gradient_accumulation_steps=4,
         num_train_epochs=args.epochs,
         learning_rate=2e-4,
-        fp16=True,
+        bf16=True,  # Use bf16 instead of fp16 for better compatibility
         logging_steps=1,
         report_to=["wandb"],
     )
 
+    print("DEBUG: Creating PEFT model...")
+    # Try with low_cpu_mem_usage=False to avoid AWQ issues
+    model = get_peft_model(base_model, lora_cfg)
+    print("DEBUG: PEFT model created")
+
+    print("DEBUG: Creating HintDistillTrainer...")
     trainer = HintDistillTrainer(
         model=model,
         args=train_args,
@@ -130,12 +145,19 @@ def main():
         temperature=2.0,
         alpha=0.5,
     )
+    print("DEBUG: Trainer created, starting training...")
     trainer.train()
+    print("DEBUG: Training completed")
 
     model.eval()
-    finetuned_acc = pass_at_k(model, tok, prompt, tests, k=args.k)
+    finetuned_acc = pass_at_k(model, tok, {"prompt": prompt, "tests": tests}, k=args.k)
     wandb.log({"pass@k_finetuned": finetuned_acc})
     print(f"Finetuned model pass@{args.k}: {finetuned_acc}")
+
+    # Evaluate base model after training for comparison
+    base_acc = pass_at_k(base_model, tok, {"prompt": prompt, "tests": tests}, k=args.k)
+    wandb.log({"pass@k_base": base_acc})
+    print(f"Base model pass@{args.k}: {base_acc}")
 
     wandb.finish()
 
