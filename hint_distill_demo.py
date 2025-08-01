@@ -57,7 +57,7 @@ def log_hint_to_file(hint_log_file, problem_metadata, hint, context, target, hin
 
 def load_apps_examples(start_idx: int, subset_size: int = None):
     """Load multiple examples from APPS dataset."""
-    ds = load_dataset("codeparrot/apps", split="test[:100]", difficulties=["interview"], trust_remote_code=True)
+    ds = load_dataset("codeparrot/apps", split="test", difficulties=["interview"], trust_remote_code=True)
     
     if subset_size is None:
         # Use full dataset
