@@ -484,3 +484,77 @@ class PromptTemplates:
             return template.replace("{problem}", problem_text)
         else:
             return template + "\n\n# Problem:\n" + problem_text
+    
+    @staticmethod
+    def get_dataset_solution_hint_prompt(problem: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON) -> str:
+        """Generate prompt for creating hints based on dataset solution."""
+        language_name = {
+            ProgrammingLanguage.PYTHON: "Python",
+            ProgrammingLanguage.CPP: "C++", 
+            ProgrammingLanguage.JAVA: "Java",
+            ProgrammingLanguage.JAVASCRIPT: "JavaScript"
+        }[language]
+        
+        return f"""Analyze this programming problem and its correct {language_name} solution to generate a subtle hint. The hint should provide ONLY the first step or smallest possible pointer toward the key insight, without EVER revealing the solution approach or giving away the answer.
+
+Problem:
+{problem}
+
+Correct Solution:
+```{language_name.lower()}
+{solution_code}
+```
+
+Generate a hint that:
+1. Gives ONLY the first tiny step toward the insight (like a breadcrumb, not the whole path)
+2. NEVER directly states the algorithm, approach, or solution method
+3. Might ask a simple question or point out what to look at (without saying why)
+4. Should be less than 15 words when possible
+
+Examples of good subtle hints:
+- "# Hint: What patterns emerge when you look at small cases?"
+- "# Hint: Consider the constraints carefully"
+- "# Hint: Start by examining the simple cases first"
+
+Provide only the hint text starting with "# Hint: " and nothing else."""
+    
+    @staticmethod
+    def get_self_reflection_hint_prompt(problem: str, model_solution_plan: str, model_solution_code: str, correct_solution: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON) -> str:
+        """Generate prompt for self-reflection hint by comparing model solution to correct solution."""
+        language_name = {
+            ProgrammingLanguage.PYTHON: "Python",
+            ProgrammingLanguage.CPP: "C++",
+            ProgrammingLanguage.JAVA: "Java", 
+            ProgrammingLanguage.JAVASCRIPT: "JavaScript"
+        }[language]
+        
+        return f"""Compare the model's attempted solution with the correct solution to generate a subtle hint. The hint should ONLY provide the smallest possible hint to point the model in the right direction, WITHOUT EVER revealing what it missed or giving away the correct approach.
+
+Problem:
+{problem}
+
+Model's Solution Plan:
+{model_solution_plan}
+
+Model's Solution Code:
+```{language_name.lower()}
+{model_solution_code}
+```
+
+Correct Solution:
+```{language_name.lower()}
+{correct_solution}
+```
+
+Based on the differences, generate a hint that:
+1. Gives ONLY the tiniest hint about what to reconsider (never state what they missed directly)
+2. NEVER mentions the correct approach, algorithm, or solution method
+3. Might suggest looking at something small or asking a minor question
+4. Should be extremely subtle, like a whisper of guidance
+
+Examples of good subtle reflection hints:
+- "# Hint: Reconsider your initial assumptions"
+- "# Hint: Maybe look at this from a different angle"
+- "# Hint: What if you approached it more simply?"
+
+Provide only the hint text starting with "# Hint: " and nothing else."""

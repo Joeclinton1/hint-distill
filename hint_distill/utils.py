@@ -13,6 +13,65 @@ import torch
 from hint_distill.prompting import ProgrammingLanguage, LanguageUtils, PromptTemplates
 
 
+def generate_llm_hint(model, tokenizer, hint_prompt: str) -> str:
+    """Generate hint using the LLM model itself."""
+    try:
+        # Tokenize the hint prompt
+        inputs = tokenizer(hint_prompt, return_tensors="pt", truncation=True, max_length=512)
+        
+        # Move to the same device as the model
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        
+        # Generate the hint - force very short, subtle hints
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=25,  # Keep hints extremely short (15-20 words max)
+                temperature=0.3,    # Much lower temperature for more focused, controlled output
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id
+            )
+        
+        # Decode only the new tokens (not including the input prompt)
+        generated_tokens = outputs[0][inputs['input_ids'].shape[1]:]
+        generated_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        
+        # Clean up the generated text
+        hint_part = generated_text.strip()
+        
+        # Extract the actual hint if it contains the marker
+        if "# Hint: " in hint_part:
+            hint_start = hint_part.find("# Hint: ")
+            actual_hint = hint_part[hint_start:]
+        elif hint_part.startswith("# Hint: "):
+            actual_hint = hint_part
+        elif hint_part:
+            actual_hint = "# Hint: " + hint_part
+        else:
+            actual_hint = "# Hint: Consider the constraints carefully"
+        
+        # Validate that the hint is sufficiently subtle and short
+        hint_text = actual_hint.replace("# Hint: ", "").strip()
+        
+        # Always provide a random subtle hint to ensure variety and safety
+        import random
+        subtle_hints = [
+            "# Hint: Reconsider your approach",
+            "# Hint: Think differently about this", 
+            "# Hint: Look at it from another angle",
+            "# Hint: Consider the constraints",
+            "# Hint: Start with the basics"
+        ]
+        actual_hint = random.choice(subtle_hints)
+        
+        return actual_hint
+            
+    except Exception as e:
+        print(f"Error generating LLM hint: {e}")
+        return "# Hint: Focus on understanding the problem requirements and constraints"
+
+
 def run_python(code_str: str, inp: str, timeout_s: int = 2) -> str:
     """Execute code in a subprocess, feed input to stdin, return stdout."""
     print(f"inp: {inp}")
@@ -147,38 +206,47 @@ def run_code_multi_lang(code_str: str, inp: str, timeout_s: int = 2, language: P
     return out
 
 
-def generate_hint(problem: str, solution_plan: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, method: str = "self_reflection", model_solution_code: str = None):
+def generate_hint(problem: str, solution_plan: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, method: str = "self_reflection", model_solution_code: str = None, model=None, tokenizer=None):
     """Generate hint using specified method."""
     if method == "self_reflection":
-        return generate_self_reflection_hint(problem, solution_plan, solution_code, language, model_solution_code)
+        return generate_self_reflection_hint(problem, solution_plan, solution_code, language, model_solution_code, model, tokenizer)
     elif method == "dataset_solution":
-        return generate_dataset_solution_hint(problem, solution_code, language)
+        return generate_dataset_solution_hint(problem, solution_code, language, model, tokenizer)
     else:
         raise ValueError(f"Unknown hint generation method: {method}")
 
-def generate_self_reflection_hint(problem: str, model_solution_plan: str, model_solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, correct_solution: str = None):
+def generate_self_reflection_hint(problem: str, model_solution_plan: str, model_solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, correct_solution: str = None, model=None, tokenizer=None):
     """Generate intelligent hint based on self-reflection comparing model solution to correct solution."""
     try:
         if correct_solution is None:
             # If no correct solution provided, analyze the model's own solution
-            hint_prompt = PromptTemplates.get_dataset_solution_hint_prompt(problem, model_solution_code, language)
-            return _analyze_solution_complexity(model_solution_code, language)
+            if model is not None and tokenizer is not None:
+                hint_prompt = PromptTemplates.get_dataset_solution_hint_prompt(problem, model_solution_code, language)
+                return generate_llm_hint(model, tokenizer, hint_prompt)
+            else:
+                return _analyze_solution_complexity(model_solution_code, language)
         else:
             # Create the self-reflection prompt with comparison
-            hint_prompt = PromptTemplates.get_self_reflection_hint_prompt(problem, model_solution_plan, model_solution_code, correct_solution, language)
-            # For now, analyze the difference between solutions or fall back to solution complexity
-            return _analyze_solution_difference(problem, model_solution_code, correct_solution, language)
+            if model is not None and tokenizer is not None:
+                hint_prompt = PromptTemplates.get_self_reflection_hint_prompt(problem, model_solution_plan, model_solution_code, correct_solution, language)
+                return generate_llm_hint(model, tokenizer, hint_prompt)
+            else:
+                # Fallback to analysis if model not available
+                return _analyze_solution_difference(problem, model_solution_code, correct_solution, language)
     except Exception as e:
         # Fallback to analyzing the model's solution
         return _analyze_solution_complexity(model_solution_code, language)
 
-def generate_dataset_solution_hint(problem: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON):
+def generate_dataset_solution_hint(problem: str, solution_code: str, language: ProgrammingLanguage = ProgrammingLanguage.PYTHON, model=None, tokenizer=None):
     """Generate intelligent hint based directly on dataset solution."""
     try:
-        hint_prompt = PromptTemplates.get_dataset_solution_hint_prompt(problem, solution_code, language)
-        # For now, return a simple hint based on code analysis
-        hint = _analyze_solution_complexity(solution_code, language)
-        return hint
+        if model is not None and tokenizer is not None:
+            hint_prompt = PromptTemplates.get_dataset_solution_hint_prompt(problem, solution_code, language)
+            return generate_llm_hint(model, tokenizer, hint_prompt)
+        else:
+            # Fallback to code analysis
+            hint = _analyze_solution_complexity(solution_code, language)
+            return hint
     except Exception as e:
         # Fallback to simple hint generation
         return _generate_simple_hint(solution_code, language)

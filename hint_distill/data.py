@@ -306,7 +306,9 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                         model_solution_code, 
                         language=language,
                         method="self_reflection",
-                        model_solution_code=correct_solution if correct_solution else None
+                        model_solution_code=correct_solution if correct_solution else None,
+                        model=model,
+                        tokenizer=tokenizer
                     )
                 elif hint_method == "dataset_solution":
                     solution_for_hint = correct_solution if correct_solution else model_solution_code
@@ -315,7 +317,9 @@ class FlexibleHintDataset(torch.utils.data.Dataset):
                         model_solution_plan, 
                         solution_for_hint, 
                         language=language,
-                        method="dataset_solution"
+                        method="dataset_solution",
+                        model=model,
+                        tokenizer=tokenizer
                     )
                 else:
                     raise ValueError(f"Unknown hint method: {hint_method}")
