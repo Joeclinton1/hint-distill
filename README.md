@@ -2,8 +2,6 @@
 
 Self-supervised hint distillation for improving LLMs on code generation.  
 This project finetunes Qwen3-4B on competitive programming datasets by generating a "hint" based on the code solutuion, and then using KL-divergence based distillation between the model with access to the hint acting as the teacher for itself.
----
-
 ## Installation
 
 ```bash
